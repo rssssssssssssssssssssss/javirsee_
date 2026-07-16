@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 /**
- * JARVIS Interactive HUD Frontend
+ * J.A.R.V.I.S. Interactive HUD Frontend (Desktop Compatible)
  * 
- * This component drives the frontend of the JARVIS assistant.
- * It contains:
- * - Boot Screen: A gesture-unlock screen to satisfy browser audio guidelines.
- * - Auto-Greeting: Speaks "Ji Boss, systems online. Ready for command." on boot and opens mic.
- * - Continuous Speech Engine: STT automatically restarts so it is always ready.
- * - Canvas Holographic Core: Responsive visual visualizer.
- * - Telemetry Dashboard: Real-time system monitoring.
+ * Exposes dual-mode bindings:
+ * 1. Native Electron Mode: Uses window.electronAPI contextBridge to call OS functions.
+ * 2. Standalone Web Mode: Uses HTTP fetch requests to node system backend server on port 5002.
  */
 export default function App() {
-  // Initialization State (to bypass browser audio autoplay restrictions)
+  // Initialization State
   const [isInitialized, setIsInitialized] = useState(false);
 
   // HUD UI & System States
@@ -42,7 +38,7 @@ export default function App() {
   const [backendOnline, setBackendOnline] = useState(false);
   const [brainSource, setBrainSource] = useState('Offline Matcher');
 
-  // Refs for audio analyzer, canvas, and logs scroll
+  // Refs
   const canvasRef = useRef(null);
   const logsEndRef = useRef(null);
   const recognitionRef = useRef(null);
@@ -50,9 +46,9 @@ export default function App() {
   const isSpeakingRef = useRef(false);
   const currentStepRef = useRef(0);
   const isInitializedRef = useRef(false);
-  const keepListeningRef = useRef(true); // Control flag to avoid overlapping starts
+  const keepListeningRef = useRef(true);
 
-  // Sync refs with states for the canvas render loop & event handlers
+  // Sync refs with states
   useEffect(() => {
     isSpeakingRef.current = isSpeaking;
   }, [isSpeaking]);
@@ -68,6 +64,14 @@ export default function App() {
   // Initial setup of system logs & SpeechRecognition setup
   useEffect(() => {
     addLog('SYSTEM', 'Initializing JARVIS terminal core...');
+    
+    // Check if running inside Electron shell
+    if (window.electronAPI) {
+      addLog('SUCCESS', 'Native Electron Shell interface detected. System bridges verified.');
+    } else {
+      addLog('SYSTEM', 'Standard browser detected. Falling back to HTTP telemetry...');
+    }
+    
     addLog('SYSTEM', 'Loading standard libraries: Web Audio, Web Speech, CanvasHUD...');
     
     // Check Web Speech API Availability
@@ -89,7 +93,6 @@ export default function App() {
       };
 
       rec.onerror = (e) => {
-        // Ignore "no-speech" errors silently to allow smooth continuous loop
         if (e.error !== 'no-speech') {
           console.error('SpeechRecognition Error', e);
           addLog('ERROR', `Voice recognition error: ${e.error}`);
@@ -121,7 +124,6 @@ export default function App() {
       recognitionRef.current = rec;
     }
 
-    addLog('SYSTEM', 'Querying local server at http://localhost:5002...');
     fetchTelemetry();
 
     // Set up intervals for telemetry polling
@@ -232,7 +234,7 @@ export default function App() {
       ctx.stroke();
 
       // Audio waveform rendering
-      if (currentStepRef.current === 1) { // Listening: ripple
+      if (currentStepRef.current === 1) { // Listening
         ctx.strokeStyle = '#05ff9b';
         ctx.shadowColor = 'rgba(5, 255, 155, 0.4)';
         ctx.lineWidth = 2.5;
@@ -244,7 +246,7 @@ export default function App() {
           else ctx.lineTo(centerX + x, centerY + y);
         }
         ctx.stroke();
-      } else if (isSpeakingRef.current) { // Speaking: audio waves
+      } else if (isSpeakingRef.current) { // Speaking
         ctx.strokeStyle = themeColor;
         ctx.shadowColor = themeGlow;
         ctx.lineWidth = 3;
@@ -256,7 +258,7 @@ export default function App() {
           else ctx.lineTo(centerX + x, centerY + y);
         }
         ctx.stroke();
-      } else if (currentStepRef.current === 3) { // Thinking: scan lines
+      } else if (currentStepRef.current === 3) { // Thinking
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.rotate(rotationAngle * 2.5);
@@ -303,9 +305,20 @@ export default function App() {
     setLogs(prev => [...prev, { time, tag, text }]);
   };
 
-  // Query server diagnostics
+  // Query server diagnostics (supports Electron / Web mode)
   const fetchTelemetry = async () => {
     try {
+      if (window.electronAPI) {
+        const data = await window.electronAPI.getTelemetry();
+        if (data && !data.error) {
+          setTelemetry(data);
+          setBackendOnline(true);
+        } else {
+          setBackendOnline(false);
+        }
+        return;
+      }
+
       const res = await fetch('http://localhost:5002/api/telemetry');
       if (res.ok) {
         const data = await res.json();
@@ -418,34 +431,42 @@ export default function App() {
     setInputVal('');
   };
 
-  // Intent router
+  // Intent router (supports Electron / Web mode)
   const processCommand = async (commandStr) => {
     setPipelineStep(3);
     addLog('SYSTEM', `Analyzing intent on: "${commandStr}"...`);
 
     try {
-      const chatRes = await fetch('http://localhost:5002/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: commandStr })
-      });
+      let data;
+      if (window.electronAPI) {
+        data = await window.electronAPI.chatBrain(commandStr);
+      } else {
+        const chatRes = await fetch('http://localhost:5002/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: commandStr })
+        });
+        if (!chatRes.ok) throw new Error('Communication failed with AI brain.');
+        data = await chatRes.json();
+      }
 
-      if (!chatRes.ok) throw new Error('Communication failed with AI brain.');
-      
-      const data = await chatRes.json();
       setBrainSource(data.brain || 'Fallback Engine');
       
       if (data.tool) {
         setPipelineStep(4);
         addLog('SYSTEM', `Triggering hardware action: [${data.tool}]`);
         
-        const execRes = await fetch('http://localhost:5002/api/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: data.tool, params: data.params })
-        });
-
-        const execData = await execRes.json();
+        let execData;
+        if (window.electronAPI) {
+          execData = await window.electronAPI.executeAction(data.tool, data.params);
+        } else {
+          const execRes = await fetch('http://localhost:5002/api/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: data.tool, params: data.params })
+          });
+          execData = await execRes.json();
+        }
         
         if (execData.success) {
           addLog('SUCCESS', `Action completed. Result: ${execData.reply}`);
@@ -479,17 +500,23 @@ export default function App() {
     }
   };
 
-  // Quick action macros
+  // Quick action macros (supports Electron / Web mode)
   const triggerQuickApp = async (appTarget) => {
     addLog('SYSTEM', `Manual Override: Starting app [${appTarget}]`);
     setPipelineStep(4);
     try {
-      const res = await fetch('http://localhost:5002/api/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'open_app', params: { app: appTarget } })
-      });
-      const data = await res.json();
+      let data;
+      if (window.electronAPI) {
+        data = await window.electronAPI.executeAction('open_app', { app: appTarget });
+      } else {
+        const res = await fetch('http://localhost:5002/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'open_app', params: { app: appTarget } })
+        });
+        data = await res.json();
+      }
+
       if (data.success) {
         addLog('SUCCESS', data.reply);
         speakText(data.reply);
@@ -506,12 +533,17 @@ export default function App() {
   const triggerVolume = async (volDir) => {
     addLog('SYSTEM', `Manual Override: Volume [${volDir}]`);
     try {
-      const res = await fetch('http://localhost:5002/api/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'system_volume', params: { action: volDir } })
-      });
-      const data = await res.json();
+      let data;
+      if (window.electronAPI) {
+        data = await window.electronAPI.executeAction('system_volume', { action: volDir });
+      } else {
+        const res = await fetch('http://localhost:5002/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'system_volume', params: { action: volDir } })
+        });
+        data = await res.json();
+      }
       if (data.success) {
         addLog('SUCCESS', data.reply);
       }
@@ -523,11 +555,15 @@ export default function App() {
   const triggerLock = async () => {
     addLog('SYSTEM', 'Manual Override: Terminal Lock');
     try {
-      await fetch('http://localhost:5002/api/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'lock_pc' })
-      });
+      if (window.electronAPI) {
+        await window.electronAPI.executeAction('lock_pc');
+      } else {
+        await fetch('http://localhost:5002/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'lock_pc' })
+        });
+      }
       addLog('SUCCESS', 'Dispatched Lock DLL Call.');
     } catch (e) {
       addLog('ERROR', `Terminal lock failed: ${e.message}`);
@@ -547,7 +583,7 @@ export default function App() {
       <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <div className="hud-card" style={{ maxWidth: '450px', width: '100%', textAlign: 'center', padding: '40px 30px' }}>
           <h2 className="glow-cyan" style={{ fontFamily: 'var(--font-hud)', fontSize: '28px', marginBottom: '20px', letterSpacing: '4px' }}>
-            J.A.R.V.I.S. HUD
+            {window.electronAPI ? '💠 J.A.R.V.I.S. NATIVE' : '💠 J.A.R.V.I.S. HUD'}
           </h2>
           <p style={{ fontSize: '13px', color: '#6398b3', marginBottom: '40px', lineHeight: '1.6' }}>
             SECURITY PROTOCOLS LOADED.<br />
@@ -574,7 +610,7 @@ export default function App() {
             </button>
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(0, 243, 255, 0.5)' }}>
-            LOCAL TELEMETRY PORT: 5002 • SECURE WEB SOOCKET CORES
+            {window.electronAPI ? 'ELECTRON NATIVE SHELL VERIFIED • OS DIRECT BRIDGES ACTIVE' : 'LOCAL TELEMETRY PORT: 5002 • SECURE WEB SOCKET CORES'}
           </div>
         </div>
       </div>
@@ -591,7 +627,7 @@ export default function App() {
         <div className="hud-system-status">
           <span>AI BRAIN: <strong style={{color: '#05ff9b'}}>{brainSource}</strong></span>
           <span>•</span>
-          <span>PORT 5002 STATUS: </span>
+          <span>{window.electronAPI ? 'NATIVE CONTROLLER: ' : 'PORT 5002 STATUS: '}</span>
           <span className={`status-dot ${backendOnline ? 'online' : 'offline'}`}></span>
           <span>{backendOnline ? 'ONLINE' : 'OFFLINE'}</span>
         </div>
@@ -723,7 +759,7 @@ export default function App() {
           <form onSubmit={handleSubmit} className="chat-container">
             <input 
               type="text" 
-              placeholder="Provide instruction to JARVIS..." 
+              placeholder="Provide instruction to J.A.R.V.I.S..." 
               value={inputVal}
               onChange={(e) => setInputVal(e.target.value)}
               className="chat-input"
