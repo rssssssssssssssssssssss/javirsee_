@@ -346,8 +346,11 @@ export default function App() {
   const speakText = (text) => {
     if (!window.speechSynthesis) return;
 
-    // Temporarily halt listening while speaking to avoid hearing itself
+    // Set synchronous flags instantly to prevent race-condition mic restarts
+    isSpeakingRef.current = true;
+    setIsSpeaking(true);
     keepListeningRef.current = false;
+
     try {
       recognitionRef.current?.stop();
     } catch (e) {}
@@ -368,27 +371,32 @@ export default function App() {
     if (jarvisVoice) utterance.voice = jarvisVoice;
 
     utterance.onstart = () => {
+      isSpeakingRef.current = true;
       setIsSpeaking(true);
       addLog('SYSTEM', `Speaking: "${text}"`);
     };
 
     utterance.onend = () => {
+      isSpeakingRef.current = false;
       setIsSpeaking(false);
       setPipelineStep(0);
       
-      // Resume continuous speech listening
+      // Resume continuous speech listening after a safe delay (lets speaker volume clear)
       keepListeningRef.current = true;
       setTimeout(() => {
         startSpeechListening();
-      }, 400);
+      }, 1000);
     };
 
     utterance.onerror = (err) => {
       console.error('SpeechSynthesis error', err);
+      isSpeakingRef.current = false;
       setIsSpeaking(false);
       setPipelineStep(0);
       keepListeningRef.current = true;
-      startSpeechListening();
+      setTimeout(() => {
+        startSpeechListening();
+      }, 1000);
     };
 
     window.speechSynthesis.speak(utterance);
