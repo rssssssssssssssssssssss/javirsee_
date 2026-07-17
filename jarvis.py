@@ -434,7 +434,7 @@ class JarvisAssistant:
             query_lower = query.lower()
 
             # Exit conditions (always active even if asleep)
-            if any(term in query_lower for term in ["shut down jarvis", "terminate cores", "goodbye jarvis"]):
+            if any(term in query_lower for term in ["shut down jarvis", "terminate cores", "goodbye jarvis", "go offline", "go ofline"]):
                 self.speak(f"Very well, {user_name}. Powering down systems. Offline.")
                 break
 
