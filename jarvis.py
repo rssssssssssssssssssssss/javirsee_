@@ -390,11 +390,16 @@ class JarvisAssistant:
         self.save_memory_data(self.memory)
 
     def run(self):
-        """Boot up and start main voice-controlled loop"""
+        """Boot up and start main voice-controlled loop with Standby/Wake support"""
         time.sleep(0.5)
         user_name = self.memory.get("user_name", "Boss")
         self.speak(f"Ji {user_name}, systems online. Ready for command.")
         
+        # Starts in standby mode waiting for wake word
+        is_awake = False
+        print("\n[STATUS] J.A.R.V.I.S. is currently in STANDBY mode.")
+        print("[STANDBY] Say 'Hey Jarvis' or 'Jarvis' to activate.")
+
         while True:
             query = self.listen()
             
@@ -402,19 +407,50 @@ class JarvisAssistant:
                 time.sleep(0.5)
                 continue
                 
-            # Exit conditions
-            if any(term in query.lower() for term in ["shut down jarvis", "terminate cores", "goodbye jarvis"]):
+            query_lower = query.lower()
+
+            # Exit conditions (always active even if asleep)
+            if any(term in query_lower for term in ["shut down jarvis", "terminate cores", "goodbye jarvis"]):
                 self.speak(f"Very well, {user_name}. Powering down systems. Offline.")
                 break
+
+            if not is_awake:
+                # Check for wake words
+                wake_words = ["hey jarvis", "jarvis", "jarvise", "hey jarvise", "hello jarvis", "hi jarvis", "wake up jarvis"]
+                if any(wake in query_lower for wake in wake_words):
+                    is_awake = True
+                    # Witty wake response
+                    import random
+                    wake_responses = [
+                        f"At your service, {user_name}.",
+                        "Yes Boss, systems online. What is your command?",
+                        "Active and listening, Boss.",
+                        "Cores fully engaged. What can I do for you?"
+                    ]
+                    self.speak(random.choice(wake_responses))
+                    time.sleep(0.4)
+                else:
+                    # Ignore background talk when in standby
+                    print(f"[STANDBY IGNORED] Captured: \"{query}\" (did not contain wake word)")
+                continue
+
+            # If awake, process command
+            if is_awake:
+                # Check if user wants to return to standby manually
+                if any(sleep_word in query_lower for sleep_word in ["go to sleep", "go to standby", "standby", "stop listening"]):
+                    self.speak("Understood, Boss. Standing by.")
+                    is_awake = False
+                    print("\n[STATUS] J.A.R.V.I.S. is back in STANDBY mode.")
+                    continue
+
+                # Run query through brain / system controller
+                reply = self.query_brain(query)
+                self.speak(reply)
                 
-            # Process command
-            reply = self.query_brain(query)
-            
-            # Speak reply out loud
-            self.speak(reply)
-            
-            # Short sleep to let sound settle before listening again
-            time.sleep(0.8)
+                # Automatically return to standby mode after executing command
+                is_awake = False
+                print("\n[STATUS] J.A.R.V.I.S. has returned to STANDBY mode.")
+                time.sleep(0.8)
 
 if __name__ == "__main__":
     try:
