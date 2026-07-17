@@ -332,7 +332,7 @@ class JarvisAssistant:
                 "format": "json"
             }
             
-            response = requests.post(self.ollama_url, json=payload, timeout=2.5)
+            response = requests.post(self.ollama_url, json=payload, timeout=15.0)
             if response.status_code == 200:
                 result = response.json()
                 content = json.loads(result["message"]["content"])
