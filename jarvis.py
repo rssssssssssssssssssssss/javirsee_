@@ -132,27 +132,26 @@ class JarvisAssistant:
     def listen(self):
         """Microphone audio capture and transcription via Google Web STT"""
         with sr.Microphone() as source:
-            print("\n[LISTENING] Adjusting for ambient noise...")
-            self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
-            print("[LISTENING] Speak now, Boss...")
-            
             try:
-                audio = self.recognizer.listen(source, timeout=6, phrase_time_limit=8)
-                print("[STT] Transcribing voice...")
+                # Capture audio with a 4-second timeout to check wake word frequently
+                audio = self.recognizer.listen(source, timeout=4, phrase_time_limit=6)
+                print("\n[STT] Transcribing voice...")
                 query = self.recognizer.recognize_google(audio)
                 print(f"[USER] You said: \"{query}\"")
                 return query.strip()
                 
             except sr.WaitTimeoutError:
+                # Polling indicator
+                print(".", end="", flush=True)
                 return None
             except sr.UnknownValueError:
                 return None
             except sr.RequestError as e:
-                print(f"[ERROR] STT Request failure: {e}")
+                print(f"\n[ERROR] STT Request failure: {e}")
                 self.speak("My communication links are impaired, Boss. I cannot reach the voice servers.")
                 return None
             except Exception as e:
-                print(f"[ERROR] Microphone capture failed: {e}")
+                print(f"\n[ERROR] Microphone capture failed: {e}")
                 return None
 
     def execute_app(self, app_name):
@@ -393,6 +392,18 @@ class JarvisAssistant:
         """Boot up and start main voice-controlled loop with Standby/Wake support"""
         time.sleep(0.5)
         user_name = self.memory.get("user_name", "Boss")
+        
+        # Calibration phase (once at boot)
+        print("\n[SYSTEM] Calibrating microphone for ambient room noise...")
+        self.speak("Calibrating microphone sensors, Boss. Please stand by.")
+        try:
+            with sr.Microphone() as source:
+                self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
+            print(f"[SYSTEM] Calibration complete. Energy threshold set to: {int(self.recognizer.energy_threshold)}")
+        except Exception as e:
+            print(f"[ERROR] Calibration failed: {e}. Using default threshold.")
+            self.recognizer.energy_threshold = 300
+            
         self.speak(f"Ji {user_name}, systems online. Ready for command.")
         
         # Starts in standby mode waiting for wake word
@@ -404,7 +415,7 @@ class JarvisAssistant:
             query = self.listen()
             
             if not query:
-                time.sleep(0.5)
+                time.sleep(0.1)
                 continue
                 
             query_lower = query.lower()
@@ -431,7 +442,7 @@ class JarvisAssistant:
                     time.sleep(0.4)
                 else:
                     # Ignore background talk when in standby
-                    print(f"[STANDBY IGNORED] Captured: \"{query}\" (did not contain wake word)")
+                    print(f"\n[STANDBY IGNORED] Captured: \"{query}\" (did not contain wake word)")
                 continue
 
             # If awake, process command
