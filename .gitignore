@@ -16,3 +16,7 @@ frontend/dist/
 # System files
 .DS_Store
 Thumbs.db
+
+# Python virtual environments
+.venv/
+venv/
