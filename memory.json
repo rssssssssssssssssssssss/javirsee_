@@ -11,6 +11,16 @@
             "user": "what is your name?",
             "assistant": "I'm JARVIS, Tony Stark's advanced personal AI assistant.",
             "timestamp": 1784320691
+        },
+        {
+            "user": "what is wake up",
+            "assistant": "Wake-up is a feature that allows you to start my services when your computer is turned on.",
+            "timestamp": 1784321547
+        },
+        {
+            "user": "offline",
+            "assistant": "Okay, Boss. I'll be available again once we're back online.",
+            "timestamp": 1784321584
         }
     ]
 }

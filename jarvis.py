@@ -12,24 +12,25 @@ import tkinter as tk
 import threading
 
 # =====================================================================
-# J.A.R.V.I.S. NATIVE SYSTEM ASSISTANT (HUD & AUTOSTART VERSION)
+# J.A.R.V.I.S. NATIVE SYSTEM ASSISTANT (POPUP HUD & ALL-APP LAUNCHER)
 # =====================================================================
 # Features:
-# 1. Automatic Startup: Auto-registers J.A.R.V.I.S. in the Windows Startup
-#    directory so it boots silently on laptop startup.
-# 2. Glowing HUD Indicator: Borderless, draggable, always-on-top Tkinter
-#    circle sitting at the top of the monitor displaying states:
-#    - Blue: Standby (monitoring for wake word)
-#    - Green: Listening / Active
-#    - Orange: Speaking / Processing
-#    - Red: Shutting down
-# 3. Native App & Folder Launchers: Opens browser, editor, system folders
-#    (Downloads, Desktop, Documents, etc.) via local subprocesses.
+# 1. Start Menu App Scanner: Recursively scans Windows Start Menu shortcuts
+#    on startup to launch ANY installed desktop app (Spotify, Chrome, VS Code,
+#    Steam, WhatsApp, Discord, etc.) natively by matching names.
+# 2. Dynamic Folder Search: Automatically searches your user directories
+#    to locate and open system/custom folders natively.
+# 3. Borderless Popup HUD Card: Replaces the dot with a borderless, rounded,
+#    always-on-top status card (200x50 px) with state labels:
+#    - Blue Dot & "STANDBY" (waiting for "Hey Jarvis")
+#    - Green Dot & "LISTENING..." (active command recording)
+#    - Orange Dot & "THINKING..." (Ollama reasoning/TTS speaking)
+#    - Red Dot & "OFFLINE" (shutting down)
 # =====================================================================
 
 class JarvisAssistant:
     def __init__(self):
-        print("[SYSTEM] Initializing J.A.R.V.I.S. cores...")
+        print("[SYSTEM] Initializing J.A.R.V.I.S. advanced cores...")
         
         # 1. State tracking for Tkinter HUD Thread
         self.gui_state = "standby"  # standby | listening | speaking | offline
@@ -50,6 +51,11 @@ class JarvisAssistant:
         self.ollama_url = "http://localhost:11434/api/chat"
         self.model_name = "llama3"
         self.device_index = None   # Default microphone index
+        
+        # 6. Windows Applications Cataloging
+        print("[SYSTEM] Cataloging installed applications...")
+        self.installed_apps = self.scan_start_menu()
+        print(f"[SYSTEM] Catalog complete. Registered {len(self.installed_apps)} desktop shortcuts.")
         
         # Auto-register startup shortcut
         self.add_to_startup()
@@ -72,9 +78,6 @@ class JarvisAssistant:
             "open pictures": lambda: self.open_folder("pictures"),
             "open music": lambda: self.open_folder("music"),
             "open videos": lambda: self.open_folder("videos"),
-            "open whatsapp": lambda: self.execute_app("whatsapp"),
-            "open what app": lambda: self.execute_app("whatsapp"),
-            "open whatapp": lambda: self.execute_app("whatsapp"),
             "volume up": lambda: self.adjust_volume("up"),
             "volume down": lambda: self.adjust_volume("down"),
             "mute volume": lambda: self.adjust_volume("mute"),
@@ -85,6 +88,23 @@ class JarvisAssistant:
             "take screenshot": self.take_screenshot,
             "screenshot": self.take_screenshot,
         }
+
+    def scan_start_menu(self):
+        """Recursively catalogs all shortcuts (*.lnk) in Windows Start Menu directories"""
+        apps = {}
+        paths = [
+            r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+            os.path.join(os.getenv("APPDATA"), r"Microsoft\Windows\Start Menu\Programs")
+        ]
+        for base_path in paths:
+            if os.path.exists(base_path):
+                for root, _, files in os.walk(base_path):
+                    for file in files:
+                        if file.endswith(".lnk"):
+                            name = file[:-4].lower().strip()
+                            shortcut_path = os.path.join(root, file)
+                            apps[name] = shortcut_path
+        return apps
 
     def add_to_startup(self):
         """Adds a shortcut of the background launcher to Windows Startup folder"""
@@ -195,34 +215,44 @@ class JarvisAssistant:
                 return None
 
     def execute_app(self, app_name):
-        """Launches Windows desktop applications natively"""
+        """Launches Windows desktop applications by name search in cataloged shortcuts"""
+        normalized_name = app_name.lower().strip()
+        
+        # Check standard default commands first
         try:
-            if app_name == "notepad":
+            if normalized_name == "notepad":
                 subprocess.Popen(["notepad.exe"])
                 return "Initializing Notepad workspace."
-            elif app_name == "calc":
+            elif normalized_name == "calc":
                 subprocess.Popen(["calc.exe"])
                 return "Opening Calculator interface."
-            elif app_name == "chrome":
+            elif normalized_name == "chrome":
                 subprocess.Popen(["cmd.exe", "/c", "start chrome"])
                 return "Launching Google Chrome, Boss."
-            elif app_name == "vscode":
+            elif normalized_name == "vscode":
                 subprocess.Popen(["cmd.exe", "/c", "code"], shell=True)
                 return "Opening VS Code workspace."
-            elif app_name == "whatsapp":
-                try:
-                    subprocess.Popen(["cmd.exe", "/c", "start whatsapp://"], shell=True)
-                    return "Launching WhatsApp, Boss."
-                except Exception:
-                    webbrowser.open("https://web.whatsapp.com/")
-                    return "Opening WhatsApp Web in your browser."
-            else:
-                return f"Application '{app_name}' is not registered."
-        except Exception as e:
-            return f"Failed to open {app_name}. Error: {str(e)}"
+        except Exception:
+            pass
+            
+        # Search cataloged installed apps shortcut mappings
+        matched_shortcut = None
+        for name, shortcut_path in self.installed_apps.items():
+            if name == normalized_name or normalized_name in name:
+                matched_shortcut = shortcut_path
+                break
+                
+        if matched_shortcut:
+            try:
+                os.startfile(matched_shortcut)
+                return f"Launching {app_name.capitalize()}, Boss."
+            except Exception as e:
+                return f"Failed to launch {app_name}. Error: {str(e)}"
+                
+        return f"Application '{app_name}' was not found in my Start Menu registry."
 
     def open_folder(self, folder_name):
-        """Natively opens local laptop folders using Explorer"""
+        """Natively opens system directories or custom folders inside user profile"""
         try:
             user_profile = os.path.expanduser("~")
             paths = {
@@ -232,9 +262,21 @@ class JarvisAssistant:
                 "pictures": os.path.join(user_profile, "Pictures"),
                 "music": os.path.join(user_profile, "Music"),
                 "videos": os.path.join(user_profile, "Videos"),
-                "explorer": user_profile
+                "explorer": user_profile,
+                "c drive": "C:\\",
+                "d drive": "D:\\"
             }
-            path = paths.get(folder_name.lower())
+            normalized = folder_name.lower().strip()
+            path = paths.get(normalized)
+            
+            # Dynamic lookup in User directory if not matching presets
+            if not path:
+                for item in os.listdir(user_profile):
+                    item_path = os.path.join(user_profile, item)
+                    if os.path.isdir(item_path) and item.lower() == normalized:
+                        path = item_path
+                        break
+                        
             if path and os.path.exists(path):
                 os.startfile(path)
                 return f"Accessing local {folder_name} folder, Boss."
@@ -348,6 +390,15 @@ class JarvisAssistant:
         if "calculate" in normalized_query or "run python" in normalized_query or "run code" in normalized_query:
             return self.run_python_code(query)
 
+        # Direct application launches: e.g., "open spotify" or "open steam"
+        if normalized_query.startswith("open ") or normalized_query.startswith("launch "):
+            app_to_open = normalized_query.replace("open ", "").replace("launch ", "").strip()
+            # If asking for a folder (e.g. "open downloads folder" or "open documents folder")
+            if "folder" in app_to_open or "drive" in app_to_open:
+                clean_folder = app_to_open.replace("folder", "").strip()
+                return self.open_folder(clean_folder)
+            return self.execute_app(app_to_open)
+
         # OS Commands overrides (fast path)
         for key, action_func in self.fallback_commands.items():
             if normalized_query.startswith(key) or key in normalized_query:
@@ -369,9 +420,9 @@ class JarvisAssistant:
                 "{\n"
                 "  \"reply\": \"Conversational text response to speak out loud\",\n"
                 "  \"tool\": \"open_app\" | \"open_folder\" | \"system_volume\" | \"lock_pc\" | \"take_screenshot\" | \"search_web\" | \"run_python\" | null,\n"
-                "  \"params\": {\"app\": \"notepad\"|\"calc\"|\"chrome\"|\"vscode\"|\"whatsapp\", \"folder\": \"downloads\"|\"documents\"|\"desktop\"|\"pictures\"|\"explorer\", \"action\": \"up\"|\"down\"|\"mute\", \"cmd\": \"python code/math expression\", \"query\": \"search query\"} (or empty)\n"
+                "  \"params\": {\"app\": \"notepad\"|\"calc\"|\"chrome\"|\"vscode\"|\"whatsapp\" (or any other custom app name), \"folder\": \"downloads\"|\"documents\"|\"desktop\"|\"pictures\"|\"explorer\" (or any other custom folder name), \"action\": \"up\"|\"down\"|\"mute\", \"cmd\": \"python code/math expression\", \"query\": \"search query\"} (or empty)\n"
                 "}\n"
-                "If the user asks to launch an app, open a system folder, lock the PC, take a screenshot, search google/youtube, calculate math, or adjust volume, specify the tool and parameters. "
+                "If the user asks to launch an app, open a folder, lock the PC, take a screenshot, search google/youtube, calculate math, or adjust volume, specify the tool and parameters. "
                 "Keep spoken replies short, professional, and slightly witty."
             )
             
@@ -467,7 +518,6 @@ class JarvisAssistant:
         print("[STANDBY] Say 'Hey Jarvis' or 'Jarvis' to activate.")
 
         while True:
-            # Set state to standby when waiting for speech
             if not is_awake:
                 self.gui_state = "standby"
             else:
@@ -485,7 +535,6 @@ class JarvisAssistant:
             if any(term in query_lower for term in ["shut down jarvis", "terminate cores", "goodbye jarvis", "go offline", "go ofline"]):
                 self.gui_state = "offline"
                 self.speak(f"Very well, {user_name}. Powering down systems. Offline.")
-                # Exit the script execution
                 os._exit(0)
 
             if not is_awake:
@@ -522,41 +571,52 @@ class JarvisAssistant:
 
 
 # =====================================================================
-# T K I N T E R   F L O A T I N G   H U D   D O T   G U I
+# T K I N T E R   F L O A T I N G   H U D   P O P U P   C A R D
 # =====================================================================
 
 class JarvisHUD:
     def __init__(self, assistant):
         self.assistant = assistant
         self.root = tk.Tk()
-        self.root.title("J.A.R.V.I.S. Core")
+        self.root.title("J.A.R.V.I.S. HUD")
         
         # Borderless window and always topmost
         self.root.overrideredirect(True)
         self.root.wm_attributes("-topmost", True)
         
-        # HUD Dot sizing (24x24 px)
-        width, height = 24, 24
+        # Sizing (180x45 px)
+        width, height = 180, 45
         
         # Position top-center of primary screen
         screen_width = self.root.winfo_screenwidth()
         x = (screen_width // 2) - (width // 2)
-        y = 4  # 4 pixels from very top edge
+        y = 5  # 5 pixels from top edge
         self.root.geometry(f"{width}x{height}+{x}+{y}")
         
-        # Make background transparent on Windows
-        self.root.config(bg="black")
-        self.root.wm_attributes("-transparentcolor", "black")
+        # Sleek dark futuristic frame: Slate dark background with cyan border
+        self.root.config(bg="#00d2ff") # outer border color
         
-        # Canvas circle drawer
-        self.canvas = tk.Canvas(self.root, width=width, height=height, bg="black", highlightthickness=0)
-        self.canvas.pack()
-        # Draw circular glowing indicator
-        self.dot = self.canvas.create_oval(2, 2, width-2, height-2, fill="#00d2ff", outline="")
+        # Inner content frame
+        self.frame = tk.Frame(self.root, bg="#0f172a", width=width-2, height=height-2)
+        self.frame.pack_propagate(False)
+        self.frame.pack(padx=1, pady=1)
         
-        # Draggable bindings (Button-1 click and Motion drag)
+        # Status glowing circle Canvas (left side)
+        self.canvas = tk.Canvas(self.frame, width=24, height=24, bg="#0f172a", highlightthickness=0)
+        self.canvas.pack(side=tk.LEFT, padx=12)
+        self.dot = self.canvas.create_oval(2, 2, 22, 22, fill="#00d2ff", outline="")
+        
+        # Status text label (right side)
+        self.label = tk.Label(self.frame, text="STANDBY", fg="#00d2ff", bg="#0f172a", font=("Courier New", 11, "bold"))
+        self.label.pack(side=tk.LEFT, padx=5)
+        
+        # Draggable bindings
+        self.frame.bind("<Button-1>", self.start_drag)
+        self.frame.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<Button-1>", self.start_drag)
         self.canvas.bind("<B1-Motion>", self.on_drag)
+        self.label.bind("<Button-1>", self.start_drag)
+        self.label.bind("<B1-Motion>", self.on_drag)
         
         # Start state polling loop
         self.update_gui()
@@ -576,13 +636,17 @@ class JarvisHUD:
         state = self.assistant.gui_state
         
         if state == "standby":
-            self.canvas.itemconfig(self.dot, fill="#00d2ff") # Glowing Cyan/Blue
+            self.canvas.itemconfig(self.dot, fill="#00d2ff") # Blue
+            self.label.config(text="STANDBY", fg="#00d2ff")
         elif state == "listening":
-            self.canvas.itemconfig(self.dot, fill="#39ff14") # Lime Green
+            self.canvas.itemconfig(self.dot, fill="#39ff14") # Green
+            self.label.config(text="LISTENING...", fg="#39ff14")
         elif state == "speaking":
-            self.canvas.itemconfig(self.dot, fill="#ffb703") # Yellow/Orange
+            self.canvas.itemconfig(self.dot, fill="#ffb703") # Orange/Yellow
+            self.label.config(text="THINKING...", fg="#ffb703")
         elif state == "offline":
             self.canvas.itemconfig(self.dot, fill="#ff003c") # Red
+            self.label.config(text="OFFLINE", fg="#ff003c")
             self.root.after(1200, self.root.destroy)
             return
             
@@ -597,6 +661,6 @@ if __name__ == "__main__":
     listener_thread = threading.Thread(target=assistant.run_loop, daemon=True)
     listener_thread.start()
     
-    # Run the Tkinter Floating HUD Dot GUI in the main thread
+    # Run the Tkinter HUD Popup Card in the main thread
     hud = JarvisHUD(assistant)
     hud.root.mainloop()
