@@ -43,6 +43,7 @@ class JarvisAssistant:
         # 4. Connection and AI Configurations
         self.ollama_url = "http://localhost:11434/api/chat"
         self.model_name = "llama3" # default local model
+        self.device_index = None   # default microphone index (change if needed)
         
         # Define local command overrides (for offline matching / safety)
         self.fallback_commands = {
@@ -131,7 +132,7 @@ class JarvisAssistant:
 
     def listen(self):
         """Microphone audio capture and transcription via Google Web STT"""
-        with sr.Microphone() as source:
+        with sr.Microphone(device_index=self.device_index) as source:
             try:
                 # Capture audio with a 4-second timeout to check wake word frequently
                 audio = self.recognizer.listen(source, timeout=4, phrase_time_limit=6)
@@ -393,12 +394,24 @@ class JarvisAssistant:
         time.sleep(0.5)
         user_name = self.memory.get("user_name", "Boss")
         
+        # Print available microphone devices on startup
+        print("\n[SYSTEM] Scanning audio recording devices...")
+        try:
+            mics = sr.Microphone.list_microphone_names()
+            for index, name in enumerate(mics):
+                print(f"  [{index}] {name}")
+        except Exception as e:
+            print(f"  [WARNING] Failed to scan recording devices: {e}")
+
         # Calibration phase (once at boot)
         print("\n[SYSTEM] Calibrating microphone for ambient room noise...")
         self.speak("Calibrating microphone sensors, Boss. Please stand by.")
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(device_index=self.device_index) as source:
                 self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
+            # Cap threshold to a sensible max (e.g., 800) so it doesn't get desensitized in loud rooms
+            if self.recognizer.energy_threshold > 800:
+                self.recognizer.energy_threshold = 800
             print(f"[SYSTEM] Calibration complete. Energy threshold set to: {int(self.recognizer.energy_threshold)}")
         except Exception as e:
             print(f"[ERROR] Calibration failed: {e}. Using default threshold.")
