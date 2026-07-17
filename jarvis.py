@@ -56,6 +56,9 @@ class JarvisAssistant:
             "open vs code": lambda: self.execute_app("vscode"),
             "open explorer": lambda: self.execute_app("explorer"),
             "open files": lambda: self.execute_app("explorer"),
+            "open whatsapp": lambda: self.execute_app("whatsapp"),
+            "open what app": lambda: self.execute_app("whatsapp"),
+            "open whatapp": lambda: self.execute_app("whatsapp"),
             "volume up": lambda: self.adjust_volume("up"),
             "volume down": lambda: self.adjust_volume("down"),
             "mute volume": lambda: self.adjust_volume("mute"),
@@ -170,6 +173,13 @@ class JarvisAssistant:
             elif app_name == "explorer":
                 subprocess.Popen(["explorer.exe"])
                 return "Accessing local file system."
+            elif app_name == "whatsapp":
+                try:
+                    subprocess.Popen(["cmd.exe", "/c", "start whatsapp://"], shell=True)
+                    return "Launching WhatsApp, Boss."
+                except Exception:
+                    webbrowser.open("https://web.whatsapp.com/")
+                    return "Opening WhatsApp Web in your browser."
             else:
                 return f"Application '{app_name}' is not registered."
         except Exception as e:
@@ -305,7 +315,7 @@ class JarvisAssistant:
                 "{\n"
                 "  \"reply\": \"Conversational text response to speak out loud\",\n"
                 "  \"tool\": \"open_app\" | \"system_volume\" | \"lock_pc\" | \"take_screenshot\" | \"search_web\" | \"run_python\" | null,\n"
-                "  \"params\": {\"app\": \"notepad\"|\"calc\"|\"chrome\"|\"vscode\"|\"explorer\", \"action\": \"up\"|\"down\"|\"mute\", \"cmd\": \"python code/math expression\", \"query\": \"search query\"} (or empty)\n"
+                "  \"params\": {\"app\": \"notepad\"|\"calc\"|\"chrome\"|\"vscode\"|\"explorer\"|\"whatsapp\", \"action\": \"up\"|\"down\"|\"mute\", \"cmd\": \"python code/math expression\", \"query\": \"search query\"} (or empty)\n"
                 "}\n"
                 "If the user asks to launch an app, lock the PC, take a screenshot, search google/youtube, calculate math, or adjust volume, specify the tool and parameters. "
                 "Keep spoken replies short, professional, and slightly witty."
