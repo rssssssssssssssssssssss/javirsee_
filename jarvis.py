@@ -53,9 +53,9 @@ class JarvisAssistant:
         self.device_index = None   # Default microphone index
         
         # 6. Windows Applications Cataloging
-        print("[SYSTEM] Cataloging installed applications...")
-        self.installed_apps = self.scan_start_menu()
-        print(f"[SYSTEM] Catalog complete. Registered {len(self.installed_apps)} desktop shortcuts.")
+        print("[SYSTEM] Loading application catalog...")
+        self.installed_apps = self.load_or_build_catalog()
+        print(f"[SYSTEM] Catalog ready. {len(self.installed_apps)} apps registered.")
         
         # Auto-register startup shortcut
         self.add_to_startup()
@@ -89,8 +89,44 @@ class JarvisAssistant:
             "screenshot": self.take_screenshot,
         }
 
-    def scan_start_menu(self):
-        """Recursively catalogs all shortcuts (*.lnk) in Windows Start Menu directories"""
+    def load_or_build_catalog(self):
+        """Loads app_catalog.json or runs build_app_catalog.py to generate it fresh."""
+        catalog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_catalog.json")
+        builder_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build_app_catalog.py")
+        
+        # Build catalog if missing or older than 7 days
+        needs_build = not os.path.exists(catalog_path)
+        if not needs_build:
+            age_days = (time.time() - os.path.getmtime(catalog_path)) / 86400
+            if age_days > 7:
+                needs_build = True
+                print("[CATALOG] Catalog is over 7 days old, rebuilding...")
+        
+        if needs_build and os.path.exists(builder_path):
+            print("[CATALOG] Building full app catalog from your laptop... (this takes ~30 seconds)")
+            try:
+                subprocess.run(
+                    [sys.executable, builder_path],
+                    capture_output=False, timeout=120
+                )
+            except Exception as e:
+                print(f"[CATALOG] Build failed: {e}")
+
+        # Load catalog JSON
+        apps = {}
+        if os.path.exists(catalog_path):
+            try:
+                with open(catalog_path, "r") as f:
+                    raw = json.load(f)
+                for name, info in raw.items():
+                    apps[name] = info.get("shortcut") or info.get("exe", "")
+                print(f"[CATALOG] Loaded {len(apps)} apps from catalog.")
+                return apps
+            except Exception as e:
+                print(f"[CATALOG] Failed to load catalog: {e}")
+        
+        # Fallback: scan Start Menu only
+        print("[CATALOG] Falling back to Start Menu scan...")
         apps = {}
         paths = [
             r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
@@ -102,8 +138,7 @@ class JarvisAssistant:
                     for file in files:
                         if file.endswith(".lnk"):
                             name = file[:-4].lower().strip()
-                            shortcut_path = os.path.join(root, file)
-                            apps[name] = shortcut_path
+                            apps[name] = os.path.join(root, file)
         return apps
 
     def add_to_startup(self):
@@ -215,41 +250,111 @@ class JarvisAssistant:
                 return None
 
     def execute_app(self, app_name):
-        """Launches Windows desktop applications by name search in cataloged shortcuts"""
+        """Launches Windows desktop applications using a 4-tier fallback system"""
         normalized_name = app_name.lower().strip()
+        user_home = os.path.expanduser("~")
         
-        # Check standard default commands first
+        # --- TIER 1: Built-in system commands ---
         try:
-            if normalized_name == "notepad":
+            if normalized_name in ["notepad", "text editor"]:
                 subprocess.Popen(["notepad.exe"])
                 return "Initializing Notepad workspace."
-            elif normalized_name == "calc":
+            elif normalized_name in ["calculator", "calc"]:
                 subprocess.Popen(["calc.exe"])
                 return "Opening Calculator interface."
-            elif normalized_name == "chrome":
+            elif normalized_name in ["chrome", "google chrome", "browser"]:
                 subprocess.Popen(["cmd.exe", "/c", "start chrome"])
                 return "Launching Google Chrome, Boss."
-            elif normalized_name == "vscode":
+            elif normalized_name in ["vscode", "vs code", "visual studio code"]:
                 subprocess.Popen(["cmd.exe", "/c", "code"], shell=True)
                 return "Opening VS Code workspace."
+            elif normalized_name in ["task manager", "taskmanager"]:
+                subprocess.Popen(["taskmgr.exe"])
+                return "Opening Task Manager."
+            elif normalized_name in ["control panel"]:
+                subprocess.Popen(["control.exe"])
+                return "Opening Control Panel."
+            elif normalized_name in ["settings", "windows settings"]:
+                subprocess.Popen(["ms-settings:"], shell=True)
+                return "Opening Windows Settings."
         except Exception:
             pass
-            
-        # Search cataloged installed apps shortcut mappings
+
+        # --- TIER 2: Known direct executable paths (UWP / AppData installs) ---
+        known_paths = {
+            "spotify": [
+                os.path.join(user_home, "AppData", "Roaming", "Spotify", "Spotify.exe"),
+                os.path.join(user_home, "AppData", "Local", "Microsoft", "WindowsApps", "Spotify.exe"),
+            ],
+            "discord": [
+                os.path.join(user_home, "AppData", "Local", "Discord", "Update.exe"),
+                os.path.join(user_home, "AppData", "Local", "Discord", "app-1.0.9179", "Discord.exe"),
+                os.path.join(user_home, "AppData", "Local", "Microsoft", "WindowsApps", "Discord.exe"),
+            ],
+            "whatsapp": [
+                os.path.join(user_home, "AppData", "Local", "WhatsApp", "WhatsApp.exe"),
+                os.path.join(user_home, "AppData", "Local", "Microsoft", "WindowsApps", "WhatsApp.exe"),
+            ],
+            "what app": [
+                os.path.join(user_home, "AppData", "Local", "WhatsApp", "WhatsApp.exe"),
+            ],
+            "whatapp": [
+                os.path.join(user_home, "AppData", "Local", "WhatsApp", "WhatsApp.exe"),
+            ],
+            "telegram": [
+                os.path.join(user_home, "AppData", "Roaming", "Telegram Desktop", "Telegram.exe"),
+                os.path.join(user_home, "AppData", "Local", "Microsoft", "WindowsApps", "Telegram.exe"),
+            ],
+            "steam": [
+                r"C:\Program Files (x86)\Steam\Steam.exe",
+                r"C:\Program Files\Steam\Steam.exe",
+            ],
+            "vlc": [
+                r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+                r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+            ],
+            "word": [r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE"],
+            "excel": [r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE"],
+            "powerpoint": [r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE"],
+            "zoom": [os.path.join(user_home, "AppData", "Roaming", "Zoom", "bin", "Zoom.exe")],
+            "obs": [r"C:\Program Files\obs-studio\bin\64bit\obs64.exe"],
+            "teams": [os.path.join(user_home, "AppData", "Local", "Microsoft", "Teams", "current", "Teams.exe")],
+        }
+        
+        for key, path_list in known_paths.items():
+            if key in normalized_name or normalized_name in key:
+                for exe_path in path_list:
+                    if os.path.exists(exe_path):
+                        # Spotify needs --update flag to launch app not just updater
+                        if "discord" in exe_path.lower() and "update" in exe_path.lower():
+                            subprocess.Popen([exe_path, "--processStart", "Discord.exe"])
+                        else:
+                            subprocess.Popen([exe_path])
+                        print(f"[APP] Launched via known path: {exe_path}")
+                        return f"Launching {app_name.capitalize()}, Boss."
+
+        # --- TIER 3: Start Menu .lnk catalog scan ---
         matched_shortcut = None
         for name, shortcut_path in self.installed_apps.items():
-            if name == normalized_name or normalized_name in name:
+            if name == normalized_name or normalized_name in name or name in normalized_name:
                 matched_shortcut = shortcut_path
                 break
                 
         if matched_shortcut:
             try:
                 os.startfile(matched_shortcut)
+                print(f"[APP] Launched via Start Menu shortcut: {matched_shortcut}")
                 return f"Launching {app_name.capitalize()}, Boss."
             except Exception as e:
-                return f"Failed to launch {app_name}. Error: {str(e)}"
-                
-        return f"Application '{app_name}' was not found in my Start Menu registry."
+                print(f"[APP] Shortcut launch failed: {e}")
+
+        # --- TIER 4: Windows shell 'start' command (last resort — works for UWP & PATH apps) ---
+        try:
+            subprocess.Popen(["cmd.exe", "/c", f"start {normalized_name}"], shell=True)
+            print(f"[APP] Attempted shell launch: start {normalized_name}")
+            return f"Attempting to open {app_name.capitalize()} via system shell, Boss."
+        except Exception as e:
+            return f"I could not locate {app_name} on this system. Error: {str(e)}"
 
     def open_folder(self, folder_name):
         """Natively opens system directories or custom folders inside user profile"""
@@ -538,7 +643,12 @@ class JarvisAssistant:
                 os._exit(0)
 
             if not is_awake:
-                wake_words = ["hey jarvis", "jarvis", "jarvise", "hey jarvise", "hello jarvis", "hi jarvis", "wake up jarvis"]
+                wake_words = [
+                    "hey jarvis", "jarvis", "jarvise", "hey jarvise",
+                    "hello jarvis", "hi jarvis", "wake up jarvis",
+                    "wake up", "jarvis wake up", "hey j", "yo jarvis",
+                    "ok jarvis", "okay jarvis", "come online", "go online"
+                ]
                 if any(wake in query_lower for wake in wake_words):
                     is_awake = True
                     import random
