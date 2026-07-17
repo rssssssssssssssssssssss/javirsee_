@@ -21,6 +21,7 @@ import time
 USER = os.path.expanduser("~")
 APPDATA_ROAMING = os.path.join(USER, "AppData", "Roaming")
 APPDATA_LOCAL   = os.path.join(USER, "AppData", "Local")
+WINDOWS_APPS    = os.path.join(USER, "AppData", "Local", "Microsoft", "WindowsApps")
 
 SCAN_DIRS = [
     r"C:\Program Files",
@@ -29,6 +30,7 @@ SCAN_DIRS = [
     APPDATA_LOCAL,
     r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
     os.path.join(APPDATA_ROAMING, "Microsoft", "Windows", "Start Menu", "Programs"),
+    WINDOWS_APPS,   # <-- UWP Store apps (Spotify, Teams, Paint, Terminal, etc.)
 ]
 
 # Output folder where .lnk shortcuts will be created
@@ -61,7 +63,7 @@ ALWAYS_INCLUDE = [
 ]
 
 
-def should_skip(exe_name, exe_path):
+def should_skip(exe_name, exe_path, is_windowsapps=False):
     """Returns True if this executable should be excluded from catalog."""
     exe_lower = exe_name.lower()
     path_lower = exe_path.lower()
@@ -69,6 +71,14 @@ def should_skip(exe_name, exe_path):
     # Always include known apps regardless of rules
     if exe_lower in [a.lower() for a in ALWAYS_INCLUDE]:
         return False
+
+    # WindowsApps stubs are 0 bytes but are real launchers — never skip them by size
+    if is_windowsapps:
+        # Only skip obvious system internals
+        system_skip = ["mcp", "_ac", "autostarter", "update", "native", "session", "server", "host", "broker", "manager", "package", "config"]
+        if any(s in exe_lower for s in system_skip):
+            return True
+        return False  # Keep all other WindowsApps stubs
 
     for skip in SKIP_SUBSTRINGS:
         if skip.lower() in exe_lower or skip.lower() in path_lower:
@@ -116,47 +126,63 @@ def build_catalog():
             print(f"[SKIP] Directory not found: {base_dir}")
             continue
 
+        is_windowsapps = (base_dir == WINDOWS_APPS)
         print(f"[SCAN] {base_dir}")
 
-        for root, dirs, files in os.walk(base_dir):
-            # Skip deep junk directories to speed up scan
-            dirs[:] = [
-                d for d in dirs
-                if not any(s in d.lower() for s in ["temp", "tmp", "cache", "logs", "crash"])
-            ]
+        # WindowsApps is flat — no subdirectory walk needed
+        if is_windowsapps:
+            try:
+                files_in_dir = [(base_dir, [], os.listdir(base_dir))]
+            except PermissionError:
+                print(f"  [!] Permission denied: {base_dir}")
+                continue
+        else:
+            files_in_dir = os.walk(base_dir)
+
+        for root, dirs, files in files_in_dir:
+            if not is_windowsapps:
+                dirs[:] = [
+                    d for d in dirs
+                    if not any(s in d.lower() for s in ["temp", "tmp", "cache", "logs", "crash"])
+                ]
 
             for file in files:
-                # Handle both .exe and .lnk
                 if file.lower().endswith(".exe"):
                     full_path = os.path.join(root, file)
 
                     if full_path in seen_paths:
                         continue
-                    if should_skip(file, full_path):
+                    if should_skip(file, full_path, is_windowsapps=is_windowsapps):
                         continue
 
                     seen_paths.add(full_path)
                     
-                    # Friendly name = exe filename without extension
-                    friendly_name = file[:-4].lower().strip()
-                    # Also add the human readable version: "My App Name" → "my app name"
-                    shortcut_filename = f"{friendly_name}.lnk"
+                    # Friendly name: exe filename without extension, lowercased
+                    raw_name = file[:-4].lower().strip()
+                    # Also store common aliases (e.g. "ms-teams" → also "teams")
+                    aliases = [raw_name]
+                    if raw_name.startswith("ms-"):
+                        aliases.append(raw_name[3:])  # "ms-teams" → "teams"
+                    if raw_name.endswith("64") or raw_name.endswith("32"):
+                        aliases.append(raw_name[:-2])  # "obs64" → "obs"
+
+                    shortcut_filename = f"{raw_name}.lnk"
                     shortcut_path = os.path.join(OUTPUT_DIR, shortcut_filename)
 
                     # Create the .lnk shortcut
                     try:
                         make_lnk(full_path, shortcut_path)
-                        catalog[friendly_name] = {
-                            "exe": full_path,
-                            "shortcut": shortcut_path
-                        }
+                        for alias in aliases:
+                            catalog[alias] = {
+                                "exe": full_path,
+                                "shortcut": shortcut_path
+                            }
                         total_found += 1
-                        print(f"  [+] {friendly_name:35s}  →  {full_path}")
+                        print(f"  [+] {raw_name:35s}  →  {full_path}")
                     except Exception as e:
                         print(f"  [!] Failed to create shortcut for {file}: {e}")
 
                 elif file.lower().endswith(".lnk"):
-                    # Also directly register existing .lnk shortcuts
                     full_path = os.path.join(root, file)
                     friendly_name = file[:-4].lower().strip()
                     if friendly_name not in catalog:
