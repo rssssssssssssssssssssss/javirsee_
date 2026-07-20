@@ -21,6 +21,21 @@
             "user": "offline",
             "assistant": "Okay, Boss. I'll be available again once we're back online.",
             "timestamp": 1784321584
+        },
+        {
+            "user": "Ok Jarvis of God of War playing",
+            "assistant": "Ah, a gamer, eh? Enjoying God of War, are you?",
+            "timestamp": 1784322696
+        },
+        {
+            "user": "hey Jarvis close bro",
+            "assistant": "Later, Boss! Still got your back!",
+            "timestamp": 1784356135
+        },
+        {
+            "user": "offline",
+            "assistant": "Okay, Boss. I'll be available again once we're back online.",
+            "timestamp": 1784523182
         }
     ]
 }

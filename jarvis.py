@@ -3,6 +3,9 @@ import sys
 import time
 import subprocess
 import json
+import wave
+import tempfile
+import struct
 import requests
 import pyautogui
 import webbrowser
@@ -10,6 +13,16 @@ import speech_recognition as sr
 import pyttsx3
 import tkinter as tk
 import threading
+
+# ── Whisper STT (local offline) ──────────────────────────────────────
+# Uses faster-whisper which is 4x faster than original openai-whisper
+# and runs entirely on your CPU with no internet connection needed.
+try:
+    from faster_whisper import WhisperModel
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    print("[WARNING] faster-whisper not installed. Falling back to Google STT.")
 
 # =====================================================================
 # J.A.R.V.I.S. NATIVE SYSTEM ASSISTANT (POPUP HUD & ALL-APP LAUNCHER)
@@ -43,16 +56,34 @@ class JarvisAssistant:
         self.tts_engine = pyttsx3.init()
         self.setup_tts_voice()
         
-        # 4. Initialize Speech Recognition Engine
+        # 4. Initialize Speech Recognition (audio capture layer)
         self.recognizer = sr.Recognizer()
         self.recognizer.dynamic_energy_threshold = True
+        self.device_index = None   # Default microphone
+
+        # 5. Load Whisper model (local offline STT)
+        # Model sizes and tradeoffs:
+        #   'tiny'   → fastest, ~390MB RAM, less accurate
+        #   'base'   → good balance, ~500MB RAM  ← we use this
+        #   'small'  → more accurate, ~1GB RAM
+        #   'medium' → very accurate, ~3GB RAM
+        #   'large'  → most accurate, ~6GB RAM
+        self.whisper_model = None
+        if WHISPER_AVAILABLE:
+            try:
+                print("[WHISPER] Loading Whisper 'base' model... (first boot downloads ~150MB)")
+                # compute_type='int8' makes it run fast on CPU without a GPU
+                self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+                print("[WHISPER] Whisper model loaded. 100% offline STT active.")
+            except Exception as e:
+                print(f"[WHISPER] Failed to load model: {e}. Falling back to Google STT.")
+                self.whisper_model = None
         
-        # 5. Configurations
+        # 6. Configurations
         self.ollama_url = "http://localhost:11434/api/chat"
         self.model_name = "llama3"
-        self.device_index = None   # Default microphone index
-        
-        # 6. Windows Applications Cataloging
+
+        # 7. Windows Applications Cataloging
         print("[SYSTEM] Loading application catalog...")
         self.installed_apps = self.load_or_build_catalog()
         print(f"[SYSTEM] Catalog ready. {len(self.installed_apps)} apps registered.")
@@ -223,27 +254,66 @@ class JarvisAssistant:
         self.gui_state = old_state
 
     def listen(self):
-        """Microphone audio capture and transcription via Google Web STT"""
+        """Records mic audio then transcribes with Whisper (offline) or Google (online fallback)"""
         self.gui_state = "standby"
         with sr.Microphone(device_index=self.device_index) as source:
             try:
-                # Capture audio with a 4-second timeout to check wake word frequently
+                # Record audio — 4s timeout, up to 6s of speech
                 audio = self.recognizer.listen(source, timeout=4, phrase_time_limit=6)
-                self.gui_state = "speaking"  # update while transcribing/talking
+
+                self.gui_state = "speaking"   # HUD turns orange while transcribing
                 print("\n[STT] Transcribing voice...")
-                query = self.recognizer.recognize_google(audio)
-                print(f"[USER] You said: \"{query}\"")
-                return query.strip()
-                
+
+                # ── PATH A: Whisper (local, offline, no internet needed) ──
+                if self.whisper_model is not None:
+                    # Save captured audio to a temporary WAV file on disk
+                    # Whisper reads audio files, not raw bytes directly
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                        tmp_path = tmp.name
+                        wav_data = audio.get_wav_data()
+                        tmp.write(wav_data)
+
+                    try:
+                        # faster-whisper returns segments and info
+                        # beam_size=5 → more accurate transcription
+                        # language='en' → forces English detection (faster)
+                        # vad_filter=True → skips silent parts automatically
+                        segments, info = self.whisper_model.transcribe(
+                            tmp_path,
+                            beam_size=5,
+                            language="en",
+                            vad_filter=True
+                        )
+                        # Merge all detected speech segments into one string
+                        query = " ".join(seg.text.strip() for seg in segments).strip()
+                        print(f"[WHISPER] Detected language: {info.language} | Confidence: {info.language_probability:.0%}")
+                    finally:
+                        # Always clean up the temp file
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+
+                    if query:
+                        print(f"[USER] You said: \"{query}\"")
+                        return query
+                    else:
+                        return None  # Whisper heard nothing meaningful
+
+                # ── PATH B: Google Web Speech (online fallback) ──
+                else:
+                    query = self.recognizer.recognize_google(audio)
+                    print(f"[USER] You said: \"{query}\"")
+                    return query.strip()
+
             except sr.WaitTimeoutError:
-                # Polling indicator
                 print(".", end="", flush=True)
                 return None
             except sr.UnknownValueError:
                 return None
             except sr.RequestError as e:
-                print(f"\n[ERROR] STT Request failure: {e}")
-                self.speak("My communication links are impaired, Boss. I cannot reach the voice servers.")
+                print(f"\n[ERROR] Google STT failure: {e}")
+                self.speak("My online voice link is down. Switching to local Whisper mode.")
                 return None
             except Exception as e:
                 print(f"\n[ERROR] Microphone capture failed: {e}")
@@ -603,7 +673,7 @@ class JarvisAssistant:
         time.sleep(0.5)
         user_name = self.memory.get("user_name", "Boss")
         
-        # Calibration phase (once at boot)
+        # Calibration phase (once at boot) — still needed for audio level thresholds
         print("\n[SYSTEM] Calibrating microphone for ambient room noise...")
         self.speak("Calibrating microphone sensors, Boss. Please stand by.")
         try:
@@ -611,10 +681,17 @@ class JarvisAssistant:
                 self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
             if self.recognizer.energy_threshold > 800:
                 self.recognizer.energy_threshold = 800
-            print(f"[SYSTEM] Calibration complete. Energy threshold set to: {int(self.recognizer.energy_threshold)}")
+            print(f"[SYSTEM] Calibration complete. Energy threshold: {int(self.recognizer.energy_threshold)}")
         except Exception as e:
             print(f"[ERROR] Calibration failed: {e}. Using default threshold.")
             self.recognizer.energy_threshold = 300
+
+        # Report which STT engine is active
+        if self.whisper_model is not None:
+            stt_engine = "Whisper (100% offline, no internet needed)"
+        else:
+            stt_engine = "Google Web Speech (requires internet)"
+        print(f"[STT] Engine: {stt_engine}")
             
         self.speak(f"Ji {user_name}, systems online. Ready for command.")
         

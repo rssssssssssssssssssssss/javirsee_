@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 J.A.R.V.I.S. Full System App Catalog Builder
 ==============================================
@@ -178,7 +179,7 @@ def build_catalog():
                                 "shortcut": shortcut_path
                             }
                         total_found += 1
-                        print(f"  [+] {raw_name:35s}  →  {full_path}")
+                        print(f"  [+] {raw_name:35s}  ->  {full_path}")
                     except Exception as e:
                         print(f"  [!] Failed to create shortcut for {file}: {e}")
 
